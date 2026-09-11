@@ -1,0 +1,19 @@
+{
+  "wifi": {
+    "ssid": "MyWiFi-2.4G",
+    "password": "wifi-password"
+  },
+  "xiaomi": {
+    "region": "de",
+    "user_id": "1234567890",
+    "pass_token": "V1:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "device_id": "0123456789abcdef"
+  },
+  "scale": {
+    "mac": "AA:BB:CC:DD:EE:FF",
+    "did": "blt.4.xxxxxxxxxxxxx",
+    "model": "yunmai.scales.ms104",
+    "sn": "00000/XXXXXXXXXXXXXXX",
+    "bindkey": "00112233445566778899aabbccddeeff"
+  }
+}

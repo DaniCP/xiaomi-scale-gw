@@ -1,0 +1,4 @@
+-r requirements.txt
+# unit tests (reference AES-CCM / RC4 implementations) and MicroPython syntax check
+cryptography>=42
+mpy-cross>=1.29

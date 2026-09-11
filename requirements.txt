@@ -1,0 +1,3 @@
+# PC tools (setup, deploy, diagnostics)
+requests>=2.31
+mpremote>=1.29
