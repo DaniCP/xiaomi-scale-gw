@@ -48,7 +48,7 @@ Sin probar: otras variantes de la S400 (p. ej. `yunmai.scales.ms103` de China), 
 ### 1. Descarga el código y las herramientas del PC
 
 ```bash
-git clone https://github.com/<usuario>/xiaomi-scale-gw.git
+git clone https://github.com/DaniCP/xiaomi-scale-gw.git
 cd xiaomi-scale-gw
 python -m pip install -r requirements.txt
 ```
