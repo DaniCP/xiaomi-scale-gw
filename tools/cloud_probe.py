@@ -89,6 +89,7 @@ def main():
         print_items(res.get("result") or [], a.limit)
     elif a.cmd == "upload":
         ok, info = uploader.upload(cloud, cfg, load(a.file))
+        info.pop("data", None)
         print("OK" if ok else "FAIL", json.dumps(info))
     elif a.cmd == "call":
         print(json.dumps(cloud.api(a.path, json.loads(a.params), hdr), indent=1, ensure_ascii=False)[:5000])
