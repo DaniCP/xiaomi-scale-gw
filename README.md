@@ -4,7 +4,7 @@
 
 [Leer en español](README.es.md)
 
-Step on the scale and a few seconds later the weighing is in Xiaomi Home, with the full body composition (body fat, muscle, BMR, body score, …), exactly as if the app had synced it.
+Step on the scale and a few seconds later the weighing is in Xiaomi Home, with the full body composition (body fat, muscle, BMR, body score, …), exactly as if the app had synced it. Optionally, the gateway also sends it to **Garmin Connect**, where you can see it on the web with charts.
 
 > [!WARNING]
 > Unofficial project, not affiliated with or endorsed by Xiaomi or Yunmai. It uses **undocumented, reverse-engineered Xiaomi Cloud APIs** that may change or stop working at any time. It stores a login token for your Xiaomi account on the Pico. Use it at your own risk.
@@ -13,6 +13,7 @@ Step on the scale and a few seconds later the weighing is in Xiaomi Home, with t
 
 ```
  S400 scale ──BLE (encrypted MiBeacon)──▶ Pico W ──HTTPS──▶ Xiaomi Cloud ──▶ Xiaomi Home app
+                                            └────HTTPS──▶ Garmin Connect (optional)
 ```
 
 1. After a weighing, the S400 broadcasts encrypted Bluetooth advertisements (MiBeacon v5, object `0x6E16`) with weight, heart rate, both impedances (50 kHz / 250 kHz), the user profile and the scale's timestamp.
@@ -23,6 +24,8 @@ Step on the scale and a few seconds later the weighing is in Xiaomi Home, with t
    - `/eco/common/scale/add`: saves the record shown in the app.
    - `/eco/scale/account/updateWeight`: updates the reference weight the scale uses to recognise you.
    - Weighings from an unrecognised person go to the app's **unclaimed data** list, like the app does.
+4. If Garmin Connect is set up, the weighing and the composition Xiaomi calculated are uploaded to Garmin as a FIT
+   weight file (`/upload-service/upload`), like a Garmin Index scale.
 
 The record uses the scale's own timestamp. In testing, opening the app afterwards (which syncs the scale's offline memory) did **not** create a duplicate.
 
@@ -78,6 +81,21 @@ If several Pico boards are connected, add `--port COM5` (Windows) or `--port /de
 
 Plug the Pico into any USB charger near the scale (within a few metres) and weigh yourself as usual.
 
+### 5. Optional: Garmin Connect
+
+```bash
+python tools/setup_garmin.py --deploy
+```
+
+1. Asks for your Garmin Connect email, password and, if enabled, the MFA code. The login runs on the PC with
+   [python-garminconnect](https://github.com/cyberjunky/python-garminconnect); the password is not stored.
+2. Asks which scale profile is yours (the log shows `scale: profile N`; `0` sends everyone's weighings).
+3. Checks that the gateway code can renew the session and adds the Garmin tokens to `secrets/config.json`.
+
+Garmin receives weight, body fat, body water, bone mass, skeletal muscle mass, BMR, metabolic age, visceral fat rating
+and BMI. The Pico renews the session every day by itself. If it stays off for **more than 30 days**, or you log out of
+Garmin everywhere, run `setup_garmin.py` again. `python tools/setup_garmin.py --remove --deploy` turns it off.
+
 > [!IMPORTANT]
 > If the Xiaomi Home app is **open and connected** to the scale, the scale sends the data to the phone instead of broadcasting it. That's fine (the app saves it), but the Pico won't see it. The gateway is for the times you don't open the app.
 
@@ -89,6 +107,7 @@ Plug the Pico into any USB charger near the scale (within a few metres) and weig
 | Fast blinking | Connecting to Wi-Fi |
 | Flickering | Receiving data from the scale |
 | Two long flashes | Weighing saved in Xiaomi Cloud |
+| Three short flashes, once | Weighing saved in Garmin Connect |
 | Three short flashes, repeating | `config.json` missing: run the setup |
 
 ## Logs and diagnostics
@@ -103,6 +122,7 @@ python -m serial.tools.miniterm COM5 115200
 17:35:40 scale: profile 1 weight 70.8 kg hr 74 imp 474.9 raw 01c4c2344aec3ba46a
 17:35:41 scale: weighing done 70.8 kg hr 74 imp 474.9/423.1 complete=True objs=2
 17:35:46 cloud: upload 70.8 kg -> OK {"createTime": 1789148140000, "bfp": 19.7, "composition": true}
+17:35:49 garmin: upload 70.8 kg -> OK {"http": 202, "id": 123456789}
 ```
 
 Check what is stored in the cloud from the PC:
@@ -124,6 +144,8 @@ python tools/cloud_probe.py unclaimed    # weighings waiting to be claimed
 | `xiaomi.device_id` | Random id identifying the gateway to Xiaomi |
 | `scale.mac`, `scale.did`, `scale.model`, `scale.sn` | Scale identifiers from your Xiaomi account |
 | `scale.bindkey` | 32-hex-character key used to decrypt the scale's Bluetooth data |
+| `garmin.profile` | Optional (`setup_garmin.py`): scale profile sent to Garmin, `0` = every recognised person |
+| `garmin.access_token`, `garmin.refresh_token`, `garmin.client_id` | Optional: Garmin Connect session (mobile app tokens) |
 
 To deploy changes manually: `python tools/deploy.py --config secrets/config.json`.
 
@@ -132,7 +154,10 @@ To deploy changes manually: `python tools/deploy.py --config secrets/config.json
 - **`pass_token` gives full access to your Xiaomi account.** It is stored in plain text in `secrets/config.json` (ignored by git) and on the Pico's flash. Anyone with physical access to the Pico can read it. Never publish that file or your Pico's filesystem.
 - To revoke access, log out of all devices in your Xiaomi account (or change the password), then run the setup again.
 - MicroPython on the Pico doesn't verify TLS certificates, so a malicious local network could intercept the traffic. Use it only on a network you trust.
-- The gateway only talks to Xiaomi servers. Nothing is sent anywhere else.
+- **`garmin.refresh_token` gives access to your Garmin Connect account** for 30 days and is renewed by the Pico, which
+  keeps the current one in `garmin.json` on its flash. Same rules: never publish it. To revoke it, change your Garmin
+  password (or log out of all sessions) and run `setup_garmin.py` again.
+- The gateway only talks to Xiaomi servers and, if you set it up, Garmin's. Nothing is sent anywhere else.
 
 ## Troubleshooting
 
@@ -141,6 +166,8 @@ To deploy changes manually: `python tools/deploy.py --config secrets/config.json
 | No `scale:` lines in the log | The app is probably connected to the scale: close it or turn off the phone's Bluetooth. Keep the Pico within a few metres. |
 | `scale: frame error bad key/mic` | Wrong bindkey (e.g. the scale was re-added to the app): run the setup again. |
 | `cloud: error ... passToken rejected` | The login token expired or was revoked: run the setup again. |
+| `garmin: login expired, run tools/setup_garmin.py again` | The Garmin session expired (Pico off for 30+ days) or was revoked: run `setup_garmin.py --deploy`. |
+| Weighing in Xiaomi Home but not in Garmin | Only the profile set in `garmin.profile` is sent, and unclaimed weighings never are. |
 | Weighing appears as *unclaimed* | The scale didn't recognise the person (profile 0). Claim it in the app; after a few weighings the scale learns. |
 | No serial port / `RPI-RP2` drive appears | The Pico is in BOOTSEL mode: copy the MicroPython `.uf2` again. Your files are kept. |
 
@@ -152,6 +179,7 @@ pico/            MicroPython firmware (runs on the Pico W)
   mibeacon.py      MiBeacon parser + AES-CCM decryption
   scale.py         Groups S400 packets into weighings
   uploader.py      Saves a weighing like the official plugin
+  garmin.py        Garmin Connect client (token renewal, FIT weight file upload)
   xmcloud.py       Minimal Xiaomi Cloud client (passToken login, RC4-signed API)
 tools/           PC tools (setup, deploy, diagnostics)
 tests/           Unit tests (run on a PC)

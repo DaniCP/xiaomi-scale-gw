@@ -168,6 +168,13 @@ def main():
         "scale": {"mac": (dev.get("mac") or "").upper(), "did": dev["did"], "model": dev.get("model"), "sn": sn,
                   "bindkey": bindkey},
     }
+    try:
+        with open(a.out) as f:
+            old = json.load(f)
+        if old.get("garmin"):
+            cfg["garmin"] = old["garmin"]  # keep the Garmin login made with tools/setup_garmin.py
+    except (OSError, ValueError):
+        pass
     with open(a.out, "w") as f:
         json.dump(cfg, f, indent=2)
     print("\nConfiguration saved to %s (it contains credentials: never share it)." % a.out)

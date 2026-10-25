@@ -9,7 +9,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # main.py goes last so a half-finished copy never boots
-FILES = ["mibeacon.py", "xmcloud.py", "scale.py", "uploader.py", "main.py"]
+FILES = ["mibeacon.py", "xmcloud.py", "scale.py", "uploader.py", "garmin.py", "main.py"]
 
 
 def main():

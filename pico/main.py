@@ -1,4 +1,4 @@
-# Xiaomi Body Composition Scale S400 -> Xiaomi Cloud gateway for Raspberry Pi Pico W.
+# Xiaomi Body Composition Scale S400 -> Xiaomi Cloud (and optionally Garmin Connect) gateway for Raspberry Pi Pico W.
 import binascii
 import gc
 import json
@@ -10,6 +10,7 @@ import machine
 import network
 import ntptime
 
+import garmin
 import mibeacon
 import scale
 import uploader
@@ -18,8 +19,13 @@ import xmcloud
 CFG_FILE = "config.json"
 SESSION_FILE = "session.json"
 QUEUE_FILE = "queue.json"
+GARMIN_FILE = "garmin.json"
+GQUEUE_FILE = "garmin_queue.json"
 NTP_EVERY_S = 6 * 3600
 RETRY_S = (10, 30, 60, 300, 900)
+GARMIN_RENEW_S = 6 * 3600  # renew the Garmin token when less is left: rotates the 30-day refresh token daily
+GARMIN_CHECK_S = 3600
+GARMIN_AUTH_RETRY_S = 6 * 3600
 
 led = machine.Pin("LED", machine.Pin.OUT)
 
@@ -111,6 +117,23 @@ def _save_session(c):
 
 cloud.on_session = _save_session
 
+gcfg = cfg.get("garmin")
+gm = None
+if gcfg:
+    _gseed = garmin.seed_id(gcfg["refresh_token"])
+    gs = load_json(GARMIN_FILE, {})
+    if gs.get("seed") != _gseed:
+        gs = {}  # new login on the PC: start again from the tokens in config.json
+    gm = garmin.Garmin(gs.get("access_token") or gcfg["access_token"], gs.get("refresh_token") or gcfg["refresh_token"],
+                       gs.get("client_id") or gcfg["client_id"])
+
+    def _save_garmin(g):
+        save_json(GARMIN_FILE, {"seed": _gseed, "access_token": g.access_token, "refresh_token": g.refresh_token,
+                                "client_id": g.client_id})
+        log("garmin: tokens refreshed")
+
+    gm.on_tokens = _save_garmin
+
 MAC = binascii.unhexlify(cfg["scale"]["mac"].replace(":", ""))
 tracker = scale.ScaleTracker(MAC, binascii.unhexlify(cfg["scale"]["bindkey"]))
 frames = []
@@ -141,8 +164,20 @@ def scan(on):
 
 
 queue = load_json(QUEUE_FILE, [])
+gqueue = load_json(GQUEUE_FILE, [])
 retry_idx = 0
 next_try = 0
+g_retry_idx = 0
+g_next_try = 0
+
+
+def to_garmin(m, res, data):
+    global g_next_try
+    if not gm or not data or res.get("unclaimed") or gcfg.get("profile", 0) not in (0, m.get("profile")):
+        return
+    gqueue.append(garmin.from_xiaomi(m, data))
+    save_json(GQUEUE_FILE, gqueue)
+    g_next_try = 0
 
 
 def flush_queue():
@@ -156,10 +191,13 @@ def flush_queue():
         while queue:
             m = queue[0]
             ok, res = uploader.upload(cloud, cfg, m)
+            data = res.pop("data", None)
             log("cloud: upload %.1f kg ->" % m["weight"], "OK" if ok else "FAIL", json.dumps(res)[:160])
             if not ok:
                 ok_all = False
                 break
+            to_garmin(m, res, data)
+            data = None
             queue.pop(0)
             save_json(QUEUE_FILE, queue)
             blink(2, 300, 150)
@@ -177,8 +215,41 @@ def flush_queue():
     return ok_all
 
 
+def garmin_sync(now):
+    """Uploads pending Garmin weighings and renews the token before it expires."""
+    global g_retry_idx, g_next_try
+    if not wifi_up():
+        g_next_try = time.time() + RETRY_S[-1]
+        return
+    scan(False)
+    gc.collect()
+    wait = GARMIN_CHECK_S
+    try:
+        if gm.expires_in(now) < GARMIN_RENEW_S:
+            gm.refresh()
+        while gqueue:
+            w = gqueue[0]
+            res = gm.upload_weight(w)
+            log("garmin: upload %.1f kg -> OK" % w["weight"], json.dumps(res))
+            gqueue.pop(0)
+            save_json(GQUEUE_FILE, gqueue)
+            blink(3, 100, 100)
+        g_retry_idx = 0
+    except garmin.AuthError as e:
+        log("garmin: login expired, run tools/setup_garmin.py again:", e)
+        wait = GARMIN_AUTH_RETRY_S
+    except Exception as e:
+        log("garmin: error", repr(e))
+        wait = RETRY_S[min(g_retry_idx, len(RETRY_S) - 1)]
+        g_retry_idx += 1
+    finally:
+        gc.collect()
+        scan(True)
+    g_next_try = time.time() + wait
+
+
 def main():
-    global next_try
+    global next_try, g_next_try
     blink(1, 500)
     while not wifi_up():
         time.sleep(10)
@@ -187,7 +258,8 @@ def main():
     ble.active(True)
     ble.irq(bt_irq)
     scan(True)
-    log("gateway ready, listening for", cfg["scale"]["mac"], "queue:", len(queue))
+    log("gateway ready, listening for", cfg["scale"]["mac"], "queue:", len(queue),
+        "garmin:", ("queue %d" % len(gqueue)) if gm else "off")
     last_sd = None
     while True:
         while frames:
@@ -213,6 +285,11 @@ def main():
             next_try = 0
         if queue and now >= next_try and tracker.cur is None:
             flush_queue()
+        if gm and now >= g_next_try and tracker.cur is None:
+            if gqueue or gm.expires_in(now) < GARMIN_RENEW_S:
+                garmin_sync(now)
+            else:
+                g_next_try = now + GARMIN_CHECK_S
         if now - last_ntp > NTP_EVERY_S:
             if wifi_up() and sync_time():
                 last_ntp = now

@@ -104,4 +104,6 @@ def upload(cloud, cfg, m):
                 "uid": uid, "weightTarget": m["weight"], "accountId": account_id, "weightUpdateTime": ts * 1000}, hdr)
         except Exception:
             pass  # the record is already saved; the reference weight is best-effort
-    return True, {"accountId": account_id, "createTime": ts * 1000, "bfp": data["bfp"], "composition": comp is not None}
+    # "data" is the stored record (used to forward the weighing to Garmin); callers drop it before logging
+    return True, {"accountId": account_id, "createTime": ts * 1000, "bfp": data["bfp"], "composition": comp is not None,
+                  "data": data}

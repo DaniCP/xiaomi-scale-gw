@@ -4,7 +4,7 @@
 
 [Read in English](README.md)
 
-Te subes a la báscula y unos segundos después la pesada está en Xiaomi Home con la composición corporal completa (grasa, músculo, metabolismo basal, puntuación…), igual que si la hubiera sincronizado la app.
+Te subes a la báscula y unos segundos después la pesada está en Xiaomi Home con la composición corporal completa (grasa, músculo, metabolismo basal, puntuación…), igual que si la hubiera sincronizado la app. Opcionalmente, el gateway también la envía a **Garmin Connect**, donde puedes verla en la web con gráficas.
 
 > [!WARNING]
 > Proyecto no oficial, sin relación con Xiaomi ni Yunmai. Usa **APIs de Xiaomi Cloud no documentadas, obtenidas por ingeniería inversa**, que pueden cambiar o dejar de funcionar en cualquier momento. Guarda en la Pico un token de sesión de tu cuenta Xiaomi. Úsalo bajo tu responsabilidad.
@@ -13,6 +13,7 @@ Te subes a la báscula y unos segundos después la pesada está en Xiaomi Home c
 
 ```
  Báscula S400 ──BLE (MiBeacon cifrado)──▶ Pico W ──HTTPS──▶ Xiaomi Cloud ──▶ app Xiaomi Home
+                                           └────HTTPS──▶ Garmin Connect (opcional)
 ```
 
 1. Tras cada pesada, la S400 emite anuncios Bluetooth cifrados (MiBeacon v5, objeto `0x6E16`). Llevan el peso, el pulso, las dos impedancias (50 kHz / 250 kHz), el perfil de usuario y la hora de la báscula.
@@ -23,6 +24,8 @@ Te subes a la báscula y unos segundos después la pesada está en Xiaomi Home c
    - `/eco/common/scale/add`: guarda la pesada que ves en la app.
    - `/eco/scale/account/updateWeight`: actualiza el peso de referencia con el que la báscula te reconoce.
    - Las pesadas de alguien no reconocido van a la lista de **datos sin reclamar** de la app, igual que hace la app.
+4. Si has configurado Garmin Connect, la pesada y la composición que calculó Xiaomi se suben a Garmin como un archivo
+   FIT de peso (`/upload-service/upload`), igual que una báscula Garmin Index.
 
 El registro usa la hora de la propia báscula. En las pruebas, abrir la app después (que sincroniza la memoria de la báscula) **no** creó duplicados.
 
@@ -78,6 +81,21 @@ Si tienes varias placas conectadas, añade `--port COM5` (Windows) o `--port /de
 
 Enchufa la Pico a cualquier cargador USB cerca de la báscula (a pocos metros) y pésate como siempre.
 
+### 5. Opcional: Garmin Connect
+
+```bash
+python tools/setup_garmin.py --deploy
+```
+
+1. Te pide el email y la contraseña de Garmin Connect y, si lo tienes activado, el código MFA. El login se hace en el
+   PC con [python-garminconnect](https://github.com/cyberjunky/python-garminconnect); la contraseña no se guarda.
+2. Te pregunta cuál es tu perfil de la báscula (el log muestra `scale: profile N`; `0` envía las pesadas de todos).
+3. Comprueba que el código del gateway puede renovar la sesión y añade los tokens de Garmin a `secrets/config.json`.
+
+Garmin recibe peso, grasa corporal, agua, masa ósea, masa muscular esquelética, metabolismo basal, edad metabólica,
+grasa visceral e IMC. La Pico renueva la sesión ella sola cada día. Si está apagada **más de 30 días**, o cierras todas
+las sesiones de Garmin, vuelve a ejecutar `setup_garmin.py`. `python tools/setup_garmin.py --remove --deploy` lo desactiva.
+
 > [!IMPORTANT]
 > Si la app Xiaomi Home está **abierta y conectada** a la báscula, la báscula le envía los datos al móvil en vez de emitirlos. No pasa nada (la app los guarda), pero la Pico no los verá. El gateway sirve para cuando no abres la app.
 
@@ -89,6 +107,7 @@ Enchufa la Pico a cualquier cargador USB cerca de la báscula (a pocos metros) y
 | Parpadeo rápido | Conectando al WiFi |
 | Parpadeo irregular | Recibiendo datos de la báscula |
 | Dos destellos largos | Pesada guardada en Xiaomi Cloud |
+| Tres destellos cortos, una vez | Pesada guardada en Garmin Connect |
 | Tres destellos cortos, repetidos | Falta `config.json`: ejecuta la configuración |
 
 ## Logs y diagnóstico
@@ -103,6 +122,7 @@ python -m serial.tools.miniterm COM5 115200
 17:35:40 scale: profile 1 weight 70.8 kg hr 74 imp 474.9 raw 01c4c2344aec3ba46a
 17:35:41 scale: weighing done 70.8 kg hr 74 imp 474.9/423.1 complete=True objs=2
 17:35:46 cloud: upload 70.8 kg -> OK {"createTime": 1789148140000, "bfp": 19.7, "composition": true}
+17:35:49 garmin: upload 70.8 kg -> OK {"http": 202, "id": 123456789}
 ```
 
 Consultar desde el PC lo que hay guardado en la nube:
@@ -124,6 +144,8 @@ El asistente genera `secrets/config.json`. [`secrets.example/config.json`](secre
 | `xiaomi.device_id` | Identificador aleatorio del gateway ante Xiaomi |
 | `scale.mac`, `scale.did`, `scale.model`, `scale.sn` | Identificadores de la báscula en tu cuenta Xiaomi |
 | `scale.bindkey` | Clave de 32 caracteres hexadecimales para descifrar los datos Bluetooth de la báscula |
+| `garmin.profile` | Opcional (`setup_garmin.py`): perfil de la báscula que se envía a Garmin, `0` = todas las personas reconocidas |
+| `garmin.access_token`, `garmin.refresh_token`, `garmin.client_id` | Opcional: sesión de Garmin Connect (tokens de la app móvil) |
 
 Para desplegar cambios a mano: `python tools/deploy.py --config secrets/config.json`.
 
@@ -132,7 +154,10 @@ Para desplegar cambios a mano: `python tools/deploy.py --config secrets/config.j
 - **`pass_token` da acceso completo a tu cuenta Xiaomi.** Se guarda en texto plano en `secrets/config.json` (ignorado por git) y en la memoria flash de la Pico. Cualquiera con acceso físico a la Pico puede leerlo. No publiques nunca ese archivo ni el contenido de la Pico.
 - Para revocar el acceso, cierra la sesión en todos los dispositivos desde tu cuenta Xiaomi (o cambia la contraseña) y vuelve a ejecutar la configuración.
 - MicroPython en la Pico no verifica los certificados TLS, así que una red local maliciosa podría interceptar el tráfico. Úsalo solo en una red de confianza.
-- El gateway solo se comunica con servidores de Xiaomi. No envía nada a ningún otro sitio.
+- **`garmin.refresh_token` da acceso a tu cuenta de Garmin Connect** durante 30 días y la Pico lo renueva; guarda el
+  vigente en `garmin.json` en su flash. Mismas reglas: no lo publiques nunca. Para revocarlo, cambia la contraseña de
+  Garmin (o cierra todas las sesiones) y vuelve a ejecutar `setup_garmin.py`.
+- El gateway solo se comunica con servidores de Xiaomi y, si lo configuras, de Garmin. No envía nada a ningún otro sitio.
 
 ## Solución de problemas
 
@@ -141,6 +166,8 @@ Para desplegar cambios a mano: `python tools/deploy.py --config secrets/config.j
 | No aparecen líneas `scale:` en el log | Probablemente la app está conectada a la báscula: ciérrala o apaga el Bluetooth del móvil. Mantén la Pico a pocos metros. |
 | `scale: frame error bad key/mic` | Bindkey incorrecta (p. ej. se volvió a añadir la báscula a la app): repite la configuración. |
 | `cloud: error ... passToken rejected` | El token de sesión caducó o se revocó: repite la configuración. |
+| `garmin: login expired, run tools/setup_garmin.py again` | La sesión de Garmin caducó (Pico apagada 30+ días) o se revocó: ejecuta `setup_garmin.py --deploy`. |
+| La pesada está en Xiaomi Home pero no en Garmin | Solo se envía el perfil de `garmin.profile`, y nunca las pesadas sin reclamar. |
 | La pesada aparece como *sin reclamar* | La báscula no reconoció a la persona (perfil 0). Reclámala en la app; tras unas cuantas pesadas la báscula aprende. |
 | No aparece el puerto serie, o aparece la unidad `RPI-RP2` | La Pico está en modo BOOTSEL: vuelve a copiar el `.uf2` de MicroPython. Tus archivos se conservan. |
 
@@ -152,6 +179,7 @@ pico/            Firmware MicroPython (se ejecuta en la Pico W)
   mibeacon.py      Parser MiBeacon + descifrado AES-CCM
   scale.py         Agrupa los paquetes de la S400 en pesadas
   uploader.py      Guarda una pesada igual que el plugin oficial
+  garmin.py        Cliente de Garmin Connect (renovación del token, subida del FIT de peso)
   xmcloud.py       Cliente mínimo de Xiaomi Cloud (login con passToken, API firmada con RC4)
 tools/           Herramientas del PC (configuración, despliegue, diagnóstico)
 tests/           Tests unitarios (se ejecutan en el PC)

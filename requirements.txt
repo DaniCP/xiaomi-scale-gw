@@ -1,3 +1,5 @@
 # PC tools (setup, deploy, diagnostics)
 requests>=2.31
 mpremote>=1.29
+# only for tools/setup_garmin.py (Garmin login + MFA)
+garminconnect>=0.3.20

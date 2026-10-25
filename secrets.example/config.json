@@ -15,5 +15,11 @@
     "model": "yunmai.scales.ms104",
     "sn": "00000/XXXXXXXXXXXXXXX",
     "bindkey": "00112233445566778899aabbccddeeff"
+  },
+  "garmin": {
+    "profile": 1,
+    "access_token": "eyJ...access-token-from-setup_garmin.py",
+    "refresh_token": "eyJ...refresh-token-from-setup_garmin.py",
+    "client_id": "GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2"
   }
 }
