@@ -92,7 +92,7 @@ def http_request(method, url, headers=None, body=None, timeout=30):
     if ":" in host:
         host, port = host.split(":")
         port = int(port)
-    addr = socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)[0][-1]
+    addr = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][-1]
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(timeout)
     chunks = []

@@ -50,6 +50,11 @@ def ask_profile(default):
             return int(n)
 
 
+def save(path, cfg):
+    with open(path, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=os.path.join(ROOT, "secrets", "config.json"))
@@ -71,15 +76,19 @@ def main():
         access, refresh, client_id = garmin_login()
         profile = a.profile if a.profile is not None else ask_profile((cfg.get("garmin") or {}).get("profile", 1))
 
+        cfg["garmin"] = {"profile": profile, "access_token": access, "refresh_token": refresh, "client_id": client_id}
+        save(a.config, cfg)  # keep the login even if the check below fails
+
         print("\n3) Checking token renewal with the gateway code (what the Pico will do)...")
         g = garmin.Garmin(access, refresh, client_id)
-        g.refresh()
+        try:
+            g.refresh()
+        except Exception as e:
+            sys.exit("   FAILED: %r\n   The login is saved; the Pico will try the same renewal." % e)
         print("   OK (session valid for %.1f h, renewed automatically by the Pico)" % (g.expires_in(time.time()) / 3600))
-        cfg["garmin"] = {"profile": profile, "access_token": g.access_token, "refresh_token": g.refresh_token,
-                         "client_id": g.client_id}
+        cfg["garmin"].update(access_token=g.access_token, refresh_token=g.refresh_token, client_id=g.client_id)
 
-    with open(a.config, "w") as f:
-        json.dump(cfg, f, indent=2)
+    save(a.config, cfg)
     print("\nConfiguration saved to %s (it contains credentials: never share it)." % a.config)
 
     if a.deploy:

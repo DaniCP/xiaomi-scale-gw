@@ -117,9 +117,9 @@ def _save_session(c):
 
 cloud.on_session = _save_session
 
-gcfg = cfg.get("garmin")
+gcfg = cfg.get("garmin") or {}
 gm = None
-if gcfg:
+if gcfg.get("refresh_token"):
     _gseed = garmin.seed_id(gcfg["refresh_token"])
     gs = load_json(GARMIN_FILE, {})
     if gs.get("seed") != _gseed:
